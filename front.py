@@ -135,14 +135,12 @@ def add_vhod_doc():
             with get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Проверяем, существует ли уже "Получен от" (writer) в базе данных
                 cursor.execute(
                     'SELECT COALESCE(id, 0) FROM db."Лицо" WHERE "Фамилия" = %s and "Имя" = %s and "Отчество" = %s',
                     (second_name, first_name, last_name)
                 )
                 result = cursor.fetchone()
 
-                # Устанавливаем id_writer на значение ID или 0, если writer отсутствует
                 pisal = result[0] if result else 0
 
                 if pisal == 0:
@@ -150,10 +148,10 @@ def add_vhod_doc():
                     last_id = cursor.fetchone()[0]
                     cursor.execute(
                         '''
-                        INSERT INTO db."Лицо" ("id", "Фамилия", "Имя", "Отчество", "Телефон", "e-mail", "Должность", "Работает в") 
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO db."Лицо" ("id", "Фамилия", "Имя", "Отчество", "Телефон", "e-mail", "Должность", "Работает в", "Дата_вступления") 
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ''',
-                        (last_id + 1, second_name, first_name, last_name, 'Null', 'Null', 0, 0)
+                        (last_id + 1, second_name, first_name, last_name, 'Null', 'Null', 0, 0, '1970-01-01')
                     )
                     id_writer = last_id + 1
                 else:
@@ -181,6 +179,10 @@ def add_vhod_doc():
         except Exception as e:
             st.error("Произошла ошибка при добавлении документа")
             print(f"Error occurred: {e}")
+
+    if (st.button("Назад")):
+        st.session_state["current_page"] = "add_doc"
+        st.session_state["rerun"] = True
 
 def add_vhod_doc_org():
     st.title("Введите данные")
@@ -227,12 +229,15 @@ def add_vhod_doc_org():
                     cursor.execute('SELECT COALESCE(MAX(id), 0) FROM db."Организация"')
                     last_id = cursor.fetchone()[0]
 
+                    cursor.execute('SELECT COALESCE(MAX("Адрес юридический"), 0) FROM db."Организация"')
+                    ur = cursor.fetchone()[0]
+
                     cursor.execute(
                         '''
                         INSERT INTO db."Организация" ("id", "Полное наименование", "Краткое наименование", "ОГРН", "ИНН", "Адрес юридический", "Адрес фактический", "Адрес почтовый", "Телефон", "e-mail", "Руководитель") 
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ''',
-                        (last_id + 1, name_of_org, short_name_of_org, 1, inn_of_org, 1, 1, 1, 'Null', 'Null', 0)
+                        (last_id + 1, name_of_org, short_name_of_org, 1, inn_of_org, ur + 1, 1, 1, 'Null', 'Null', 0)
                     )
 
                     id_writer = last_id + 1
@@ -261,6 +266,10 @@ def add_vhod_doc_org():
         except Exception as e:
             st.error("Произошла ошибка при добавлении документа")
             print(f"Error occurred: {e}")
+
+    if (st.button("Назад")):
+        st.session_state["current_page"] = "add_doc"
+        st.session_state["rerun"] = True
 
 def phys_or_org():
     st.title("Выбор отправителя")
@@ -312,10 +321,10 @@ def add_lic():
                     last_id = cursor.fetchone()[0]
                     cursor.execute(
                         '''
-                        INSERT INTO db."Лицо" ("id", "Фамилия", "Имя", "Отчество", "Телефон", "e-mail", "Должность", "Работает в") 
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO db."Лицо" ("id", "Фамилия", "Имя", "Отчество", "Телефон", "e-mail", "Должность", "Работает в", "Дата_вступления") 
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ''',
-                        (last_id + 1, second_name, first_name, last_name, 'Null', 'Null', 0, 0)
+                        (last_id + 1, second_name, first_name, last_name, 'Null', 'Null', 0, 0, '1970-01-01')
                     )
                     id_writer = last_id + 1
                 else:
@@ -344,6 +353,10 @@ def add_lic():
             st.error("Произошла ошибка при добавлении документа")
             print(f"Error occurred: {e}")
 
+    if (st.button("Назад")):
+        st.session_state["current_page"] = "add_doc"
+        st.session_state["rerun"] = True
+
 def add_org():
     st.title("Введите данные")
 
@@ -363,8 +376,6 @@ def add_org():
         try:
             with get_connection() as conn:
                 cursor = conn.cursor()
-
-
 
                 if not (inn_of_org or name_of_org or short_name_of_org):
                     st.error("Заполните хотя бы одно поле об организации.")
@@ -391,12 +402,15 @@ def add_org():
                     cursor.execute('SELECT COALESCE(MAX(id), 0) FROM db."Организация"')
                     last_id = cursor.fetchone()[0]
 
+                    cursor.execute('SELECT COALESCE(MAX("Адрес юридический"), 0) FROM db."Организация"')
+                    ur = cursor.fetchone()[0]
+
                     cursor.execute(
                         '''
                         INSERT INTO db."Организация" ("id", "Полное наименование", "Краткое наименование", "ОГРН", "ИНН", "Адрес юридический", "Адрес фактический", "Адрес почтовый", "Телефон", "e-mail", "Руководитель") 
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ''',
-                        (last_id + 1, name_of_org, short_name_of_org, 1, inn_of_org, 1, 1, 1, 'Null', 'Null', 0)
+                        (last_id + 1, name_of_org, short_name_of_org, 1, inn_of_org, ur + 1, 1, 1, 'Null', 'Null', 0)
                     )
 
                     id_writer = last_id + 1
@@ -425,6 +439,10 @@ def add_org():
         except Exception as e:
             st.error("Произошла ошибка при добавлении документа")
             print(f"Error occurred: {e}")
+
+    if (st.button("Назад")):
+        st.session_state["current_page"] = "add_doc"
+        st.session_state["rerun"] = True
 
 def send_doc():
     st.title("Выбор отправителя")
@@ -689,8 +707,6 @@ def vse_pol_admin():
                 # Обработка результатов
                 processed_results = []
                 for row in results:
-                    print(row)
-
                     date, number, fio, name, inn, full_name, short_name, doc_type = row
 
                     fio = fio if fio != 'Мнимый Мнимый Мнимый' else '==========================>'
@@ -720,6 +736,343 @@ def vse_pol_admin():
         st.session_state["current_page"] = "come_mess"
         st.session_state["rerun"] = True
 
+def dop_human():
+    st.title("Проверка на существование нужного пользователя")
+
+    st.text("Укажите ФИО")
+    second_name = st.text_input("Фамилия", key="second_name")
+    first_name = st.text_input("Имя", key="name")
+    last_name = st.text_input("Отчество", key="last_name")
+    number_of_phone = st.text_input("Номер телефона", key="number_of_phone")
+    e_mail = st.text_input("Почта", key="e-mail")
+    post = st.text_input("Должность", key="post")
+    work = st.text_input("Работает в", key="work")
+    date = st.text_input("Дата вступления в должность", key="date")
+
+    fl = 0
+
+    if st.button("Добавить"):
+        try:
+            with get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Проверяем, существует ли пользователь
+                cursor.execute(
+                    'SELECT id FROM db."Лицо" WHERE "Фамилия" = %s and "Имя" = %s and "Отчество" = %s',
+                    (second_name, first_name, last_name)
+                )
+                result = cursor.fetchone()
+
+                if result:
+                    # Получаем ID пользователя
+                    user_id = result[0]
+
+                    # Динамически формируем запрос на обновление
+                    update_fields = []
+                    update_values = []
+
+                    if number_of_phone:
+                        update_fields.append('"Телефон" = %s')
+                        update_values.append(number_of_phone)
+
+                    if e_mail:
+                        update_fields.append('"e-mail" = %s')
+                        update_values.append(e_mail)
+
+                    if post:
+                        update_fields.append('"Должность" = %s')
+                        update_values.append(post)
+
+                    if work:
+                        update_fields.append('"Работает в" = %s')
+                        update_values.append(work)
+
+                    if date:
+                        update_fields.append('"Дата_вступления" = %s')
+                        update_values.append(date)
+
+                    # Если есть что обновлять
+                    if update_fields:
+                        update_query = f'''
+                            UPDATE db."Лицо"
+                            SET {', '.join(update_fields)}
+                            WHERE id = %s
+                        '''
+                        update_values.append(user_id)  # Добавляем ID в конец списка
+                        cursor.execute(update_query, tuple(update_values))
+                else:
+                    st.error("Человек не найден")
+                    fl = 1
+
+            if fl != 1:
+                # Сохраняем изменения
+                conn.commit()
+                st.success("Дополнительная информация добавлена")
+                time.sleep(2)
+                st.session_state["current_page"] = "come_mess"
+                st.session_state["rerun"] = True  # Триггер для перерисовки страницы
+        except Exception as e:
+            st.error("Произошла ошибка при добавлении данных")
+            print(f"Error occurred: {e}")
+
+
+    if st.button("Назад"):
+        st.session_state["current_page"] = "dop"
+        st.session_state["rerun"] = True
+
+def dop_org():
+    st.title("Проверка на существование нужной организации")
+
+    st.text("Укажите сокращенное название организации")
+    short_name_of_org = st.text_input("Сокращенное название", key="short_name_of_org")
+
+    st.text("Дополнительная информация")
+    ogrn = st.text_input("ОГРН", key="ogrn")
+
+    st.text("Адрес")
+    country = st.text_input("Страна", key="country")
+    region = st.text_input("Регион", key="region")
+    idx = st.text_input("Индекс", key="idx")
+    district = st.text_input("Район", key="district")
+    locality = st.text_input("Населенный пункт", key="locality")
+    street = st.text_input("Улица", key="street")
+    house = st.text_input("Дом", key="house")
+    korpus = st.text_input("Корпус", key="korpus")
+    building = st.text_input("Строение", key="building")
+
+    st.text("Другие данные")
+    number = st.text_input("Телефон", key="number")
+    email = st.text_input("e-mail", key="email")
+    st.text("Руководитель")
+    second_name = st.text_input("Фамилия", key="second_name")
+    first_name = st.text_input("Имя", key="name")
+    last_name = st.text_input("Отчество", key="last_name")
+
+    if st.button("Добавить"):
+        try:
+            with get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Проверяем, существует ли организация
+                cursor.execute(
+                    'SELECT id FROM db."Организация" WHERE "Краткое наименование" = %s',
+                    (short_name_of_org,)
+                )
+                result = cursor.fetchone()
+
+                if result:
+                    org_id = result[0]
+                    update_fields = []
+                    update_values = []
+
+                    if ogrn:
+                        update_fields.append('"ОГРН" = %s')
+                        update_values.append(ogrn)
+
+                    if number:
+                        update_fields.append('"Телефон" = %s')
+                        update_values.append(number)
+
+                    if email:
+                        update_fields.append('"e-mail" = %s')
+                        update_values.append(email)
+
+                    if first_name and second_name and last_name:
+                        cursor.execute(
+                            '''
+                            SELECT id FROM db."Лицо"
+                            WHERE "Имя" = %s AND "Фамилия" = %s AND "Отчество" = %s
+                            ''',
+                            (first_name, second_name, last_name)
+                        )
+                        boss_result = cursor.fetchone()
+
+                        if boss_result:
+                            boss_id = boss_result[0]
+                            update_fields.append('"Руководитель" = %s')
+                            update_values.append(boss_id)
+                        else:
+                            st.error("Руководитель не найден")
+                            return
+
+                    if update_fields:
+                        update_query = f'''
+                            UPDATE db."Организация"
+                            SET {', '.join(update_fields)}
+                            WHERE id = %s
+                        '''
+                        update_values.append(org_id)
+                        cursor.execute(update_query, tuple(update_values))
+
+                    # Проверяем адрес организации
+                    cursor.execute(
+                        '''
+                        SELECT "Адрес юридический" FROM db."Организация" WHERE "Краткое наименование" = %s
+                        ''',
+                        (short_name_of_org,)
+                    )
+                    address_result = cursor.fetchone()
+
+                    id_in_adr = address_result[0]
+
+                    if id_in_adr != 1:
+                        update_fields = []
+                        update_values = []
+
+                        print("ABVSHVASDVSAUDYVSAKUTYDVASIYDTASYDTUAYSDR")
+
+                        if country:
+                            update_fields.append('"страна" = %s')
+                            update_values.append(country)
+
+                        if region:
+                            update_fields.append('"регион" = %s')
+                            update_values.append(region)
+
+                        if idx:
+                            update_fields.append('"индекс" = %s')
+                            update_values.append(idx)
+
+                        if district:
+                            update_fields.append('"район" = %s')
+                            update_values.append(district)
+
+                        if locality:
+                            update_fields.append('"населенный_пункт" = %s')
+                            update_values.append(locality)
+
+                        if street:
+                            update_fields.append('"улица" = %s')
+                            update_values.append(street)
+
+                        if house:
+                            update_fields.append('"дом" = %s')
+                            update_values.append(house)
+
+                        if korpus:
+                            update_fields.append('"корпус" = %s')
+                            update_values.append(korpus)
+
+                        if building:
+                            update_fields.append('"строение" = %s')
+                            update_values.append(building)
+
+                        if update_fields:
+                            update_query = f'''
+                                UPDATE db."Адрес"
+                                SET {', '.join(update_fields)}
+                                WHERE id = %s
+                            '''
+                            update_values.append(id_in_adr)
+                            cursor.execute(update_query, tuple(update_values))
+                    else:
+
+                        insert_fields = []
+                        insert_values = []
+                        field_placeholders = []
+
+                        if country:
+                            insert_fields.append('"страна"')
+                            insert_values.append(country)
+                            field_placeholders.append('%s')
+
+                        if region:
+                            insert_fields.append('"регион"')
+                            insert_values.append(region)
+                            field_placeholders.append('%s')
+
+                        if idx:
+                            insert_fields.append('"индекс"')
+                            insert_values.append(idx)
+                            field_placeholders.append('%s')
+
+                        if district:
+                            insert_fields.append('"район"')
+                            insert_values.append(district)
+                            field_placeholders.append('%s')
+
+                        if locality:
+                            insert_fields.append('"населенный_пункт"')
+                            insert_values.append(locality)
+                            field_placeholders.append('%s')
+
+                        if street:
+                            insert_fields.append('"улица"')
+                            insert_values.append(street)
+                            field_placeholders.append('%s')
+
+                        if house:
+                            insert_fields.append('"дом"')
+                            insert_values.append(house)
+                            field_placeholders.append('%s')
+
+                        if korpus:
+                            insert_fields.append('"корпус"')
+                            insert_values.append(korpus)
+                            field_placeholders.append('%s')
+
+                        if building:
+                            insert_fields.append('"строение"')
+                            insert_values.append(building)
+                            field_placeholders.append('%s')
+
+                        cursor.execute('SELECT COALESCE(MAX("id"), 0) + 1 FROM db."Адрес"')
+                        new_id = cursor.fetchone()[0]
+
+                        cursor.execute(
+                            '''
+                            UPDATE db."Организация"
+                            SET "Адрес юридический" = %s
+                            WHERE "id" = %s
+                            ''',
+                            (new_id, org_id)
+                        )
+
+                        insert_fields.append('"id"')
+                        insert_values.append(new_id)
+                        field_placeholders.append('%s')
+
+                        insert_fields.append('"org_id"')
+                        insert_values.append(org_id)
+                        field_placeholders.append('%s')
+
+                        insert_query = f'''
+                            INSERT INTO db."Адрес" ({', '.join(insert_fields)})
+                            VALUES ({', '.join(field_placeholders)})
+                        '''
+                        cursor.execute(insert_query, tuple(insert_values))
+                else:
+                    st.error("Организация не найдена")
+                    return
+
+                conn.commit()
+                st.success("Дополнительная информация добавлена")
+                time.sleep(2)
+                st.session_state["current_page"] = "come_mess"
+                st.session_state["rerun"] = True
+        except Exception as e:
+            st.error("Произошла ошибка при добавлении данных")
+            print(f"Error occurred: {e}")
+
+    if st.button("Назад"):
+        st.session_state["current_page"] = "dop"
+        st.session_state["rerun"] = True
+
+def dop():
+    st.title("Дополнительные данные")
+
+    if (st.button("Физическое лицо")):
+        st.session_state["current_page"] = "dop_human"
+        st.session_state["rerun"] = True
+
+    if (st.button("Организация")):
+        st.session_state["current_page"] = "dop_org"
+        st.session_state["rerun"] = True
+
+    if (st.button("Назад")):
+        st.session_state["current_page"] = "come_mess"
+        st.session_state["rerun"] = True
+
 def come_mess():
     st.title("Выбор типа документа")
     if st.button("Добавить документ"):
@@ -736,6 +1089,10 @@ def come_mess():
 
     if st.button("Посмотреть все"):
         st.session_state["current_page"] = 'vse_pol'
+        st.session_state["rerun"] = True
+
+    if st.button("Внести дополнительные данные"):
+        st.session_state["current_page"] = 'dop'
         st.session_state["rerun"] = True
 
     # Проверяем уровень пользователя
@@ -781,6 +1138,12 @@ def main():
         vse_pol()
     elif st.session_state["current_page"] == "vse_pol_admin":
         vse_pol_admin()
+    elif st.session_state["current_page"] == "dop":
+        dop()
+    elif st.session_state["current_page"] == "dop_human":
+        dop_human()
+    elif st.session_state["current_page"] == "dop_org":
+        dop_org()
 
     # Принудительная перерисовка
     if st.session_state["rerun"]:

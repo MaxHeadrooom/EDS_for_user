@@ -14,4 +14,4 @@ DB_CONFIG = {
 
 # Pool settings
 POOL_MIN_CONN = int(os.getenv("POOL_MIN_CONN", 1))
-POOL_MAX_CONN = int(os.getenv("POOL_MAX_CONN", 10))
+POOL_MAX_CONN = int(os.getenv("POOL_MAX_CONN", 100))
