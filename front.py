@@ -10,6 +10,117 @@ import pandas as pd
 
 load_dotenv("env.env")
 
+import uuid
+import time
+from redis_client import redis_client
+from redis_client import redis_cache
+import secrets
+
+SESSION_TTL = 3600
+
+import uuid
+import streamlit as st
+
+def init_session():
+    params = st.experimental_get_query_params()
+    if "sid" in params and params["sid"]:
+        sid = params["sid"][0]
+    else:
+        sid = str(uuid.uuid4())
+        st.experimental_set_query_params(sid=sid)
+
+    st.session_state["session_id"] = sid
+    key = f"session:{sid}"
+
+    try:
+        data = redis_client.hgetall(key)
+        if data:
+            for k, v in data.items():
+                st.session_state[k.decode()] = v.decode()
+    except Exception:
+        pass
+
+    try:
+        redis_client.expire(key, SESSION_TTL)
+    except Exception:
+        pass
+
+def save_current_page_to_redis(page_name: str):
+    try:
+        session_key = f"session:{st.session_state['session_id']}"
+        redis_client.hset(session_key, "current_page", page_name)
+        redis_client.expire(session_key, SESSION_TTL)
+    except Exception as e:
+        print(f"Ошибка записи current_page в Redis: {e}")
+
+def init_pubsub():
+    """
+    Создаёт подписку на канал 'notifications' и сохраняет pubsub-объект в session_state.
+    """
+    if "pubsub" not in st.session_state:
+        pubsub = redis_client.pubsub()
+        pubsub.subscribe("notifications")
+        st.session_state["pubsub"] = pubsub
+
+def check_notifications():
+    pubsub = st.session_state.get("pubsub")
+    if not pubsub:
+        return
+    msg = pubsub.get_message()
+    if msg and msg["type"] == "message":
+        print(f"[Redis PubSub] 📢 {msg['data'].decode()}")
+
+def check_queue():
+    """
+    Считывает одно сообщение из Redis-списка notify_queue и выводит его.
+    """
+    msg = redis_client.lpop("notify_queue")
+    if msg:
+        text = msg.decode("utf-8")
+        # в терминале
+        print(f"[Queue] 📢 {text}")
+        # в интерфейсе Streamlit (если нужно)
+        st.toast(text)
+
+
+#vse_pol_admin
+@redis_cache(ttl=180)
+def fetch_all_documents():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT 
+                d."Дата", 
+                d."Номер", 
+                CONCAT(л."Фамилия", ' ', л."Имя", ' ', COALESCE(л."Отчество", '')) AS "ФИО",
+                COALESCE(u."username", 'Не указано') AS "Имя Пользователя",
+                COALESCE(CAST(o."ИНН" AS TEXT), 'Не указано') AS "ИНН", 
+                COALESCE(o."Полное наименование", 'Не указано') AS "Полное название", 
+                COALESCE(o."Краткое наименование", 'Не указано') AS "Краткое название", 
+                'Входящий' AS "Тип документа"
+            FROM db."Входящий документ" d
+            LEFT JOIN db."Организация" o ON d."Получен_от_организация" = o.id
+            LEFT JOIN db."Лицо" л ON d."Получен от" = л.id
+            LEFT JOIN db."users" u ON d."user_id" = u.id
+
+            UNION ALL
+
+            SELECT 
+                d."Дата", 
+                d."Номер", 
+                CONCAT(л."Фамилия", ' ', л."Имя", ' ', COALESCE(л."Отчество", '')) AS "ФИО",
+                COALESCE(u."username", 'Не указано') AS "Имя Пользователя",
+                COALESCE(CAST(o."ИНН" AS TEXT), 'Не указано') AS "ИНН", 
+                COALESCE(o."Полное наименование", 'Не указано') AS "Полное название", 
+                COALESCE(o."Краткое наименование", 'Не указано') AS "Краткое название", 
+                'Исходящий' AS "Тип документа"
+            FROM db."Исходящий документ" d
+            LEFT JOIN db."Организация" o ON d."Направлен_организация" = o.id
+            LEFT JOIN db."Лицо" л ON d."Направлен" = л.id
+            LEFT JOIN db."users" u ON d."user_id" = u.id
+        ''')
+        return cursor.fetchall()
+
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
@@ -62,12 +173,16 @@ def registration():
                         time.sleep(2)
                         # Переключение обратно на страницу входа
                         st.session_state["current_page"] = "login"
+                        save_current_page_to_redis("login")
                         st.session_state["rerun"] = True  # Скрытый триггер для обновления
             except Exception as e:
                 print(f"Error occurred: {e}")
         else:
             st.error("Заполните все поля!")
 
+import secrets
+
+#токен
 def login():
     st.title("Вход в аккаунт")
 
@@ -95,11 +210,29 @@ def login():
 
                             time.sleep(2)
 
-                            # Сохраняем данные в сессии
+                            # Генерация авторизационного токена
+                            user_token = secrets.token_urlsafe(32)
+
+                            # Сохраняем данные в session_state
                             st.session_state["current_page"] = "come_mess"
                             st.session_state["user_level"] = user_level
                             st.session_state["id"] = user_id
+                            st.session_state["auth_token"] = user_token
                             st.session_state["rerun"] = True
+
+                            # Сохраняем токен отдельно
+                            redis_client.setex(f"auth_token:{user_token}", SESSION_TTL, user_id)
+
+                            # Сохраняем в Redis сессию
+                            session_key = f"session:{st.session_state['session_id']}"
+                            redis_client.hset(session_key, mapping={
+                                "current_page": "come_mess",
+                                "user_level": str(user_level),
+                                "id": str(user_id),
+                                "auth_token": user_token
+                            })
+                            redis_client.expire(session_key, SESSION_TTL)
+
                         else:
                             st.error("Неверный пароль.")
                     else:
@@ -109,11 +242,11 @@ def login():
         else:
             st.error("Введите логин и пароль!")
 
-
-    # Кнопка для перехода на страницу регистрации
+    # Кнопка для перехода на регистрацию
     if st.button("Зарегистрироваться"):
         st.session_state["current_page"] = "registration"
-        st.session_state["rerun"] = True  # Скрытый триггер для обновления
+        save_current_page_to_redis("registration")
+        st.session_state["rerun"] = True
 
 def add_vhod_doc():
     st.title("Введите данные")
@@ -170,11 +303,13 @@ def add_vhod_doc():
                     (last_id, date, number, id_writer, id, 0)
                 )
                 conn.commit()
+                redis_client.rpush("notify_queue", f"Новый документ №{last_id} добавлен")
                 st.success("Документ успешно добавлен")
 
                 # Переход на другую страницу после успешного добавления
                 time.sleep(2)
                 st.session_state["current_page"] = "add_doc"
+                save_current_page_to_redis("add_doc")
                 st.session_state["rerun"] = True  # Триггер для перерисовки страницы
         except Exception as e:
             st.error("Произошла ошибка при добавлении документа")
@@ -182,6 +317,7 @@ def add_vhod_doc():
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "add_doc"
+        save_current_page_to_redis("add_doc")
         st.session_state["rerun"] = True
 
 def add_vhod_doc_org():
@@ -262,6 +398,7 @@ def add_vhod_doc_org():
                 # Переход на другую страницу после успешного добавления
                 time.sleep(2)
                 st.session_state["current_page"] = "add_doc"
+                save_current_page_to_redis("add_doc")
                 st.session_state["rerun"] = True  # Триггер для перерисовки страницы
         except Exception as e:
             st.error("Произошла ошибка при добавлении документа")
@@ -269,6 +406,7 @@ def add_vhod_doc_org():
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "add_doc"
+        save_current_page_to_redis("add_doc")
         st.session_state["rerun"] = True
 
 def phys_or_org():
@@ -276,14 +414,17 @@ def phys_or_org():
 
     if (st.button("Физическое лицо")):
         st.session_state["current_page"] = "add_vhod_doc"
+        save_current_page_to_redis("add_vhod_doc")
         st.session_state["rerun"] = True
 
     if (st.button("Организация")):
         st.session_state["current_page"] = "add_vhod_doc_org"
+        save_current_page_to_redis("add_vhod_doc_org")
         st.session_state["rerun"] = True
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "add_doc"
+        save_current_page_to_redis("add_doc")
         st.session_state["rerun"] = True
 
 def add_lic():
@@ -348,6 +489,7 @@ def add_lic():
                 # Переход на другую страницу после успешного добавления
                 time.sleep(2)
                 st.session_state["current_page"] = "add_doc"
+                save_current_page_to_redis("add_doc")
                 st.session_state["rerun"] = True  # Триггер для перерисовки страницы
         except Exception as e:
             st.error("Произошла ошибка при добавлении документа")
@@ -355,6 +497,7 @@ def add_lic():
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "add_doc"
+        save_current_page_to_redis("add_doc")
         st.session_state["rerun"] = True
 
 def add_org():
@@ -435,6 +578,7 @@ def add_org():
                 # Переход на другую страницу после успешного добавления
                 time.sleep(2)
                 st.session_state["current_page"] = "add_doc"
+                save_current_page_to_redis("add_doc")
                 st.session_state["rerun"] = True  # Триггер для перерисовки страницы
         except Exception as e:
             st.error("Произошла ошибка при добавлении документа")
@@ -442,6 +586,7 @@ def add_org():
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "add_doc"
+        save_current_page_to_redis("add_doc")
         st.session_state["rerun"] = True
 
 def send_doc():
@@ -449,14 +594,17 @@ def send_doc():
 
     if (st.button("Физическое лицо")):
         st.session_state["current_page"] = "add_lic"
+        save_current_page_to_redis("add_lic")
         st.session_state["rerun"] = True
 
     if (st.button("Организация")):
         st.session_state["current_page"] = "add_org"
+        save_current_page_to_redis("add_org")
         st.session_state["rerun"] = True
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "add_doc"
+        save_current_page_to_redis("add_doc")
         st.session_state["rerun"] = True
 
 def add_doc():
@@ -464,14 +612,17 @@ def add_doc():
 
     if (st.button("Входящий документ")):
         st.session_state["current_page"] = "phys_or_org"
+        save_current_page_to_redis("phys_or_org")
         st.session_state["rerun"] = True
 
     if (st.button("Исходящий документ")):
         st.session_state["current_page"] = "send_doc"
+        save_current_page_to_redis("sned_doc")
         st.session_state["rerun"] = True
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "come_mess"
+        save_current_page_to_redis("come_mess")
         st.session_state["rerun"] = True
 
 def ischod():
@@ -529,6 +680,7 @@ def ischod():
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "come_mess"
+        save_current_page_to_redis("come_mess")
         st.session_state["rerun"] = True
 
 def vhod():
@@ -586,6 +738,7 @@ def vhod():
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "come_mess"
+        save_current_page_to_redis("come_mess")
         st.session_state["rerun"] = True
 
 def vse_pol():
@@ -659,81 +812,49 @@ def vse_pol():
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "come_mess"
+        save_current_page_to_redis("come_mess")
         st.session_state["rerun"] = True
 
 def vse_pol_admin():
     id = st.session_state.get("id")  # Получение ID пользователя из сессии
 
     try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT 
-                    d."Дата", 
-                    d."Номер", 
-                    CONCAT(л."Фамилия", ' ', л."Имя", ' ', COALESCE(л."Отчество", '')) AS "ФИО",
-                    COALESCE(u."username", 'Не указано') AS "Имя Пользователя",
-                    COALESCE(CAST(o."ИНН" AS TEXT), 'Не указано') AS "ИНН", 
-                    COALESCE(o."Полное наименование", 'Не указано') AS "Полное название", 
-                    COALESCE(o."Краткое наименование", 'Не указано') AS "Краткое название", 
-                    'Входящий' AS "Тип документа"
-                FROM db."Входящий документ" d
-                LEFT JOIN db."Организация" o ON d."Получен_от_организация" = o.id
-                LEFT JOIN db."Лицо" л ON d."Получен от" = л.id
-                LEFT JOIN db."users" u ON d."user_id" = u.id
+        results = fetch_all_documents()
 
-                UNION ALL
+        if results:
+            st.write("Результаты запроса:")
 
-                SELECT 
-                    d."Дата", 
-                    d."Номер", 
-                    CONCAT(л."Фамилия", ' ', л."Имя", ' ', COALESCE(л."Отчество", '')) AS "ФИО",
-                    COALESCE(u."username", 'Не указано') AS "Имя Пользователя",
-                    COALESCE(CAST(o."ИНН" AS TEXT), 'Не указано') AS "ИНН", 
-                    COALESCE(o."Полное наименование", 'Не указано') AS "Полное название", 
-                    COALESCE(o."Краткое наименование", 'Не указано') AS "Краткое название", 
-                    'Исходящий' AS "Тип документа"
-                FROM db."Исходящий документ" d
-                LEFT JOIN db."Организация" o ON d."Направлен_организация" = o.id
-                LEFT JOIN db."Лицо" л ON d."Направлен" = л.id
-                LEFT JOIN db."users" u ON d."user_id" = u.id
-            ''')
+            # Обработка результатов
+            processed_results = []
+            for row in results:
+                date, number, fio, name, inn, full_name, short_name, doc_type = row
 
-            results = cursor.fetchall()
+                fio = fio if fio != 'Мнимый Мнимый Мнимый' else '==========================>'
+                inn = inn if inn and inn != '0' else '<Не указано>'
+                full_name = full_name if full_name and full_name != 'Мнимый' else '<Не указано>'
+                short_name = short_name if short_name and short_name != 'Мнимый' else '<Не указано>'
 
-            if results:
-                st.write("Результаты запроса:")
+                # Добавляем строку в обработанные результаты
+                processed_results.append((date, number, fio, name, inn, full_name, short_name, doc_type))
 
-                # Обработка результатов
-                processed_results = []
-                for row in results:
-                    date, number, fio, name, inn, full_name, short_name, doc_type = row
+            # Создание DataFrame
+            df = pd.DataFrame(
+                processed_results,
+                columns=["Дата", "Номер", "ФИО", "Имя Пользователя", "ИНН", "Полное наименование", "Краткое название", "Тип документа"]
+            )
+            df.reset_index(drop=True, inplace=True)
 
-                    fio = fio if fio != 'Мнимый Мнимый Мнимый' else '==========================>'
-                    inn = inn if inn and inn != '0' else '<Не указано>'
-                    full_name = full_name if full_name and full_name != 'Мнимый' else '<Не указано>'
-                    short_name = short_name if short_name and short_name != 'Мнимый' else '<Не указано>'
-
-                    # Добавляем строку в обработанные результаты
-                    processed_results.append((date, number, fio, name, inn, full_name, short_name, doc_type))
-
-                # Создание DataFrame
-                df = pd.DataFrame(
-                    processed_results,
-                    columns=["Дата", "Номер", "ФИО", "Имя Пользователя", "ИНН", "Полное наименование", "Краткое название", "Тип документа"]
-                )
-                df.reset_index(drop=True, inplace=True)
-
-                # Отображение таблицы
-                st.dataframe(df.style.hide(axis="index"))
-            else:
-                st.write("Нет данных для указанного пользователя.")
+            # Отображение таблицы
+            st.dataframe(df.style.hide(axis="index"))
+        else:
+            st.write("Нет данных для указанного пользователя.")
     except Exception as e:
         st.error("Произошла ошибка при выполнении запроса.")
         print(f"Error occurred: {e}")
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "come_mess"
+        save_current_page_to_redis("come_mess")
         st.session_state["rerun"] = True
 
 def dop_human():
@@ -810,6 +931,7 @@ def dop_human():
                 st.success("Дополнительная информация добавлена")
                 time.sleep(2)
                 st.session_state["current_page"] = "come_mess"
+                save_current_page_to_redis("come_mess")
                 st.session_state["rerun"] = True  # Триггер для перерисовки страницы
         except Exception as e:
             st.error("Произошла ошибка при добавлении данных")
@@ -818,6 +940,7 @@ def dop_human():
 
     if st.button("Назад"):
         st.session_state["current_page"] = "dop"
+        save_current_page_to_redis("dop")
         st.session_state["rerun"] = True
 
 def dop_org():
@@ -1049,6 +1172,7 @@ def dop_org():
                 st.success("Дополнительная информация добавлена")
                 time.sleep(2)
                 st.session_state["current_page"] = "come_mess"
+                save_current_page_to_redis("come_mess")
                 st.session_state["rerun"] = True
         except Exception as e:
             st.error("Произошла ошибка при добавлении данных")
@@ -1056,6 +1180,7 @@ def dop_org():
 
     if st.button("Назад"):
         st.session_state["current_page"] = "dop"
+        save_current_page_to_redis("dop")
         st.session_state["rerun"] = True
 
 def dop():
@@ -1063,36 +1188,44 @@ def dop():
 
     if (st.button("Физическое лицо")):
         st.session_state["current_page"] = "dop_human"
+        save_current_page_to_redis("dop_human")
         st.session_state["rerun"] = True
 
     if (st.button("Организация")):
         st.session_state["current_page"] = "dop_org"
+        save_current_page_to_redis("dop_org")
         st.session_state["rerun"] = True
 
     if (st.button("Назад")):
         st.session_state["current_page"] = "come_mess"
+        save_current_page_to_redis("come_mess")
         st.session_state["rerun"] = True
 
 def come_mess():
     st.title("Выбор типа документа")
     if st.button("Добавить документ"):
         st.session_state["current_page"] = "add_doc"
+        save_current_page_to_redis("add_doc")
         st.session_state["rerun"] = True
 
     if st.button("Исходящий документ"):
         st.session_state["current_page"] = 'ischod'
+        save_current_page_to_redis("ischod")
         st.session_state["rerun"] = True
 
     if st.button("Входящий документ"):
         st.session_state["current_page"] = 'vhod'
+        save_current_page_to_redis("vhod")
         st.session_state["rerun"] = True
 
     if st.button("Посмотреть все"):
         st.session_state["current_page"] = 'vse_pol'
+        save_current_page_to_redis("vse_pol")
         st.session_state["rerun"] = True
 
     if st.button("Внести дополнительные данные"):
         st.session_state["current_page"] = 'dop'
+        save_current_page_to_redis("dop")
         st.session_state["rerun"] = True
 
     # Проверяем уровень пользователя
@@ -1101,54 +1234,66 @@ def come_mess():
     if user_level == '2':
         if st.button("Посмотреть все документы пользователей"):
             st.session_state["current_page"] = 'vse_pol_admin'
+            save_current_page_to_redis("vse_pol_admin")
             st.session_state["rerun"] = True
 
 def main():
-    # Проверяем текущее состояние страницы
-    if "current_page" not in st.session_state:
-        st.session_state["current_page"] = "login"  # Стартовая страница
-        st.session_state["rerun"] = False  # Инициализируем скрытый триггер
+    init_session()
+    check_queue()  # или Pub/Sub, если используешь его
 
-    # Отображаем соответствующую страницу
-    if st.session_state["current_page"] == "login":
+    # Решаем, на какую страницу идти
+    if st.session_state.get("id"):
+        # если есть авторизация — остаёмся на текущей странице (или по умолчанию come_mess)
+        page = st.session_state.get("current_page", "come_mess")
+    else:
+        # нет авторизации — идём на логин
+        page = "login"
+
+    # Если page отличается от текущего — обновляем и сохраняем в Redis
+    if st.session_state.get("current_page") != page:
+        st.session_state["current_page"] = page
+        save_current_page_to_redis(page)
+
+    # Отрисовываем страницу по переменной page
+    if page == "login":
         login()
-    elif st.session_state["current_page"] == "registration":
+    elif page == "registration":
         registration()
-    elif st.session_state["current_page"] == "come_mess":
+    elif page == "come_mess":
         come_mess()
-    elif st.session_state["current_page"] == "add_doc":
+    elif page == "add_doc":
         add_doc()
-    elif st.session_state["current_page"] == "phys_or_org":
+    elif page == "phys_or_org":
         phys_or_org()
-    elif st.session_state["current_page"] == "add_vhod_doc":
+    elif page == "add_vhod_doc":
         add_vhod_doc()
-    elif st.session_state["current_page"] == "add_vhod_doc_org":
+    elif page == "add_vhod_doc_org":
         add_vhod_doc_org()
-    elif st.session_state["current_page"] == "send_doc":
+    elif page == "send_doc":
         send_doc()
-    elif st.session_state["current_page"] == "add_lic":
+    elif page == "add_lic":
         add_lic()
-    elif st.session_state["current_page"] == "add_org":
+    elif page == "add_org":
         add_org()
-    elif st.session_state["current_page"] == "ischod":
+    elif page == "ischod":
         ischod()
-    elif st.session_state["current_page"] == "vhod":
+    elif page == "vhod":
         vhod()
-    elif st.session_state["current_page"] == "vse_pol":
+    elif page == "vse_pol":
         vse_pol()
-    elif st.session_state["current_page"] == "vse_pol_admin":
+    elif page == "vse_pol_admin":
         vse_pol_admin()
-    elif st.session_state["current_page"] == "dop":
+    elif page == "dop":
         dop()
-    elif st.session_state["current_page"] == "dop_human":
+    elif page == "dop_human":
         dop_human()
-    elif st.session_state["current_page"] == "dop_org":
+    elif page == "dop_org":
         dop_org()
 
-    # Принудительная перерисовка
-    if st.session_state["rerun"]:
-        st.session_state["rerun"] = False  # Сбрасываем триггер
-        st.rerun()
 
+    # Принудительная перерисовка
+    if st.session_state.get("rerun", False):
+        st.session_state["rerun"] = False
+        st.rerun()
 if __name__ == "__main__":
     main()

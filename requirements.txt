@@ -1,0 +1,12 @@
+streamlit
+psycopg2-binary
+redis
+pg8000
+dotenv
+atexit
+pandas
+hashlib
+time
+contextlib
+queue
+threading
